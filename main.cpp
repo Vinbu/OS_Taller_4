@@ -1,12 +1,17 @@
 #include <iostream>
+#include <opencv2/imgcodecs.hpp>
 #include <opencv2/opencv.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <iostream> 
+#include <filesystem>
 
 using namespace cv;
 using namespace std;
 
 int main(int argc, char **argv) {
     // Read the image file
-    Mat image = imread("../capi.jpg");
+    Mat image = imread("../images/capi.jpg", IMREAD_COLOR);
+    Mat grayImage;
 
     // Check for failure
     if (image.empty()) {
@@ -15,15 +20,23 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    String windowName = "The legendary capibara"; // Name of the window
+    cvtColor(image, grayImage, COLOR_BGR2GRAY);
 
-    namedWindow(windowName); // Create a window
+    std::string path = "../out"; // Specify the folder name 
 
-    imshow(windowName, image); // Show our image inside the created window.
+    try { 
+        if (std::filesystem::create_directory(path)) { 
+            std::cout << "Directory created successfully: " << path << std::endl; 
+        } else { 
+            std::cout << "Directory already exists: " << path << std::endl; 
+        } 
+    } catch (const std::filesystem::filesystem_error& e) { 
+        std::cerr << "Error creating directory: " << e.what() << std::endl; 
+    }
 
-    waitKey(0); // Wait for any keystroke in the window
 
-    destroyWindow(windowName); // destroy the created window
+    imwrite("../out/graycapi.jpg", grayImage);
+    cout << "Image saved (hopefully)" << endl;
 
     return 0;
 }
