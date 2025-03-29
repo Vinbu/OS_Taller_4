@@ -4,26 +4,51 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <iostream> 
 #include <filesystem>
+#include <opencv2/core/utility.hpp>
 
 using namespace cv;
 using namespace std;
 
-int main(int argc, char **argv) {
-    // Read the image file
-    Mat image = imread("../images/capi.jpg", IMREAD_COLOR);
+Mat convert_to_gray(const Mat& image) {
     Mat grayImage;
+    cvtColor(image, grayImage, COLOR_BGR2GRAY);
+    return grayImage;
+}
 
-    // Check for failure
-    if (image.empty()) {
-        cout << "Could not open or find the image" << endl;
-        cin.get(); // wait for any key press
+int main(int argc, char **argv) {
+    /*
+     * Gets the paths of the images that match the pattern.
+     * and stores them in the vector fn.
+     */
+    vector<cv::String> fn;
+    glob("../images/*", fn, false);
+    if (fn.empty()) {
+        cout << "No images found in the specified directory." << endl;
         return -1;
     }
 
-    cvtColor(image, grayImage, COLOR_BGR2GRAY);
+    /*
+     * Reads the images from the paths stored in the vector fn.
+     * and stores them in the vector images.
+     */
+    vector<Mat> images;
+    size_t count = fn.size();
+    for (size_t i = 0; i < count; i++) {
+        Mat img = imread(fn[i]);
+        if (img.empty()) {
+            cout << "Could not open or find the image: " << fn[i] << endl;
+            continue;
+        }
+        images.push_back(img);
+    }
 
+    // prints the images` paths for debugging purposes
+    for (size_t i = 0; i < count; i++) {
+        cout << "Image " << i << ": " << fn[i] << endl;
+    }
+
+    // Creates a directory to save the images
     std::string path = "../out"; // Specify the folder name 
-
     try { 
         if (std::filesystem::create_directory(path)) { 
             std::cout << "Directory created successfully: " << path << std::endl; 
@@ -34,9 +59,15 @@ int main(int argc, char **argv) {
         std::cerr << "Error creating directory: " << e.what() << std::endl; 
     }
 
+    // Save the gray image
+    // TODO: save the image with the same name as the original image
+    for (size_t i = 0; i < count; i++) {
+        Mat grayImg = convert_to_gray(images[i]);
+        std::string outputPath = path + "/gray_" + std::to_string(i) + ".jpg";
+        imwrite(outputPath, grayImg);
+    }
 
-    imwrite("../out/graycapi.jpg", grayImage);
-    cout << "Image saved (hopefully)" << endl;
+    cout << "Images saved (hopefully)" << endl;
 
     return 0;
 }
