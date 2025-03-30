@@ -1,25 +1,47 @@
 #include <iostream>
+#include <pthread.h>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/opencv.hpp>
-#include <opencv2/imgproc/imgproc.hpp>
-#include <iostream> 
 #include <filesystem>
-#include <opencv2/core/utility.hpp>
 
 using namespace cv;
 using namespace std;
 
+const int NUM_THREADS = 5;
+
+// Each threadd will have its own data structure to hold the image and output path. 
+struct ThreadData {
+    Mat image;
+    std::string outputPath;
+    int threadIndex;
+};
+
+// Function to convert an image to grayscale.
 Mat convert_to_gray(const Mat& image) {
     Mat grayImage;
     cvtColor(image, grayImage, COLOR_BGR2GRAY);
     return grayImage;
 }
 
+// Thread function that converts the image and saves the result.
+void* thread_convert(void* arg) {
+    ThreadData* data = static_cast<ThreadData*>(arg);
+    
+    // Print starting message.
+    cout << "Thread " << data->threadIndex << " started processing." << endl;
+    
+    Mat gray = convert_to_gray(data->image);
+    imwrite(data->outputPath, gray);
+    
+    // Print finishing message.
+    cout << "Thread " << data->threadIndex << " finished processing and saved " << data->outputPath << endl;
+    
+    delete data;  // Clean up allocated memory.
+    pthread_exit(nullptr);
+}
+
 int main(int argc, char **argv) {
-    /*
-     * Gets the paths of the images that match the pattern.
-     * and stores them in the vector fn.
-     */
+    // Load image filenames.
     vector<cv::String> fn;
     glob("../images/*", fn, false);
     if (fn.empty()) {
@@ -27,13 +49,9 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-    /*
-     * Reads the images from the paths stored in the vector fn.
-     * and stores them in the vector images.
-     */
+    // Load images from the filenames.
     vector<Mat> images;
-    size_t count = fn.size();
-    for (size_t i = 0; i < count; i++) {
+    for (size_t i = 0; i < fn.size(); i++) {
         Mat img = imread(fn[i]);
         if (img.empty()) {
             cout << "Could not open or find the image: " << fn[i] << endl;
@@ -42,32 +60,51 @@ int main(int argc, char **argv) {
         images.push_back(img);
     }
 
-    // prints the images` paths for debugging purposes
-    for (size_t i = 0; i < count; i++) {
-        cout << "Image " << i << ": " << fn[i] << endl;
+    // Create output directory.
+    std::string outDir = "../out";
+    try {
+        if (std::filesystem::create_directory(outDir)) {
+            cout << "Directory created successfully: " << outDir << endl;
+        } else {
+            cout << "Directory already exists: " << outDir << endl;
+        }
+    } catch (const std::filesystem::filesystem_error& e) {
+        cerr << "Error creating directory: " << e.what() << endl;
+        return -1;
     }
 
-    // Creates a directory to save the images
-    std::string path = "../out"; // Specify the folder name 
-    try { 
-        if (std::filesystem::create_directory(path)) { 
-            std::cout << "Directory created successfully: " << path << std::endl; 
-        } else { 
-            std::cout << "Directory already exists: " << path << std::endl; 
-        } 
-    } catch (const std::filesystem::filesystem_error& e) { 
-        std::cerr << "Error creating directory: " << e.what() << std::endl; 
+    // Process images in batches of NUM_THREADS concurrently.
+    size_t total = images.size();
+    for (size_t i = 0; i < total; i += NUM_THREADS) {
+        pthread_t threads[NUM_THREADS];
+        int threadsCreated = 0;
+        
+        // Create up to NUM_THREADS threads if there are images available.
+        for (int j = 0; j < NUM_THREADS && (i + j) < total; j++) {
+            // Prepare thread data.
+            ThreadData* data = new ThreadData;
+            data->image = images[i + j];  // Copy the image.
+            data->outputPath = outDir + "/gray_" + std::to_string(i + j) + ".jpg";
+            data->threadIndex = i + j; // Assign a unique thread index.
+            
+            cout << "Main thread: Creating thread " << data->threadIndex << endl;
+            // Create the thread.
+            int rc = pthread_create(&threads[j], nullptr, thread_convert, (void*)data);
+            if (rc) {
+                cerr << "Error: unable to create thread, " << rc << endl;
+                delete data;  // Clean up if thread creation fails.
+                continue;
+            }
+            threadsCreated++;
+        }
+        
+        // Wait for the created threads to finish.
+        for (int j = 0; j < threadsCreated; j++) {
+            pthread_join(threads[j], nullptr);
+            cout << "Main thread: Joined thread " << (i + j) << endl;
+        }
     }
 
-    // Save the gray image
-    // TODO: save the image with the same name as the original image
-    for (size_t i = 0; i < count; i++) {
-        Mat grayImg = convert_to_gray(images[i]);
-        std::string outputPath = path + "/gray_" + std::to_string(i) + ".jpg";
-        imwrite(outputPath, grayImg);
-    }
-
-    cout << "Images saved (hopefully)" << endl;
-
+    cout << "All images processed and saved." << endl;
     return 0;
 }
