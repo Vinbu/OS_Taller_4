@@ -24,18 +24,33 @@ Mat convert_to_gray(const Mat& image) {
 }
 
 // Thread function that converts the image and saves the result.
-void* thread_convert(void* arg) {
+void* thread_convert_gray(void* arg) {
     ThreadData* data = static_cast<ThreadData*>(arg);
-    
+
     // Print starting message.
     cout << "Thread " << data->threadIndex << " started processing." << endl;
-    
+
     Mat gray = convert_to_gray(data->image);
     imwrite(data->outputPath, gray);
-    
+
     // Print finishing message.
     cout << "Thread " << data->threadIndex << " finished processing and saved " << data->outputPath << endl;
-    
+
+    delete data;  // Clean up allocated memory.
+    pthread_exit(nullptr);
+}
+
+void* thread_convert_format(void* arg) {
+    ThreadData* data = static_cast<ThreadData*>(arg);
+
+    // Print starting message.
+    cout << "Thread " << data->threadIndex << " started processing." << endl;
+
+    imwrite(data->outputPath, data->image);
+
+    // Print finishing message.
+    cout << "Thread " << data->threadIndex << " finished processing and saved " << data->outputPath << endl;
+
     delete data;  // Clean up allocated memory.
     pthread_exit(nullptr);
 }
@@ -141,15 +156,17 @@ int main(int argc, char **argv) {
             
             // Create up to NUM_THREADS threads if there are images available.
             for (int j = 0; j < num_threads && (i + j) < total; j++) {
+                std::filesystem::path imagePath(fn[i + j]);
+                std::string image_name_format = imagePath.filename().string();
                 // Prepare thread data.
                 ThreadData* data = new ThreadData;
                 data->image = images[i + j];  // Copy the image.
-                data->outputPath = output + "/gray_" + std::to_string(i + j) + ".jpg";
+                data->outputPath = output + "/" + image_name_format;
                 data->threadIndex = i + j; // Assign a unique thread index.
                 
                 cout << "Main thread: Creating thread " << data->threadIndex << endl;
                 // Create the thread.
-                int rc = pthread_create(&threads[j], nullptr, thread_convert, (void*)data);
+                int rc = pthread_create(&threads[j], nullptr, thread_convert_gray, (void*)data);
                 if (rc) {
                     cerr << "Error: unable to create thread, " << rc << endl;
                     delete data;  // Clean up if thread creation fails.
@@ -170,7 +187,49 @@ int main(int argc, char **argv) {
     }
 
     if (fFlag) {
-        // Future Implementation
+        // Load image filenames.
+        vector<cv::String> fn = load_images_filenames(input);
+
+        // Load images from the filenames.
+        vector<Mat> images = load_images(fn);
+
+        // Create output directory.
+        create_output_directory(output);
+
+        size_t total = images.size();
+        for (size_t i = 0; i < total; i += num_threads) {
+            pthread_t threads[num_threads];
+            int threadsCreated = 0;
+            
+            // Create up to NUM_THREADS threads if there are images available.
+            for (int j = 0; j < num_threads && (i + j) < total; j++) {
+                std::filesystem::path imagePath(fn[i + j]);
+                std::string image_name = imagePath.stem().string();
+                // Prepare thread data.
+                ThreadData* data = new ThreadData;
+                data->image = images[i + j];  // Copy the image.
+                data->outputPath = output + "/" + image_name + "." + format;
+                data->threadIndex = i + j; // Assign a unique thread index.
+                
+                cout << "Main thread: Creating thread " << data->threadIndex << endl;
+                // Create the thread.
+                int rc = pthread_create(&threads[j], nullptr, thread_convert_format, (void*)data);
+                if (rc) {
+                    cerr << "Error: unable to create thread, " << rc << endl;
+                    delete data;  // Clean up if thread creation fails.
+                    continue;
+                }
+                threadsCreated++;
+            }
+            
+            // Wait for the created threads to finish.
+            for (int j = 0; j < threadsCreated; j++) {
+                pthread_join(threads[j], nullptr);
+                cout << "Main thread: Joined thread " << (i + j) << endl;
+            }
+        }
+
+        cout << "All images processed and saved." << endl;
         return 0;
     }
     return 0;
