@@ -40,13 +40,50 @@ void* thread_convert(void* arg) {
     pthread_exit(nullptr);
 }
 
+vector<cv::String> load_images_filenames(const string& input) {
+    vector<cv::String> fn;
+    cout << "Searching in directory: " << input << endl;
+    glob(input, fn, false);
+    if (fn.empty()) {
+        cout << "No images found in the specified directory." << endl;
+    }
+    return fn;
+}
+
+vector<Mat> load_images(const vector<cv::String>& fn) {
+    vector<Mat> images;
+    for (size_t i = 0; i < fn.size(); i++) {
+        Mat img = imread(fn[i]);
+        if (img.empty()) {
+            cout << "Could not open or find the image: " << fn[i] << endl;
+            continue;
+        }
+        images.push_back(img);
+    }
+    return images;
+}
+
+int create_output_directory(const string& output) {
+    try {
+        if (std::filesystem::create_directory(output)) {
+            cout << "Directory created successfully: " << output << endl;
+        } else {
+            cout << "Directory already exists: " << output << endl;
+        }
+    } catch (const std::filesystem::filesystem_error& e) {
+        cerr << "Error creating directory: " << e.what() << endl;
+        return -1;
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
     int c;
     bool gFlag = false, fFlag = false;
-    std::string input, output;
+    std::string input, output, format;
     int num_threads = 0;
 
-    while ((c = getopt(argc, argv, "gfi:o:n:")) != -1) {
+    while ((c = getopt(argc, argv, "gfi:o:n:t:")) != -1) {
         switch (c) {
             case 'g':
                 if (fFlag) {
@@ -76,6 +113,10 @@ int main(int argc, char **argv) {
                 num_threads = std::stoi(optarg);
                 break;
 
+            case 't':
+                format = optarg;
+                break;
+
             default:
                 std::cerr << "Uso: " << argv[0] << " [-g | -f] -i input -o output -n threads" << std::endl;
                 return 1;
@@ -84,37 +125,13 @@ int main(int argc, char **argv) {
 
     if (gFlag) {
         // Load image filenames.
-        vector<cv::String> fn;
-        cout << "Searching in directory: " << input << endl;
-        glob(input, fn, false);
-        if (fn.empty()) {
-            cout << "No images found in the specified directory." << endl;
-            return -1;
-        }
+        vector<cv::String> fn = load_images_filenames(input);
 
         // Load images from the filenames.
-        vector<Mat> images;
-        for (size_t i = 0; i < fn.size(); i++) {
-            Mat img = imread(fn[i]);
-            if (img.empty()) {
-                cout << "Could not open or find the image: " << fn[i] << endl;
-                continue;
-            }
-            images.push_back(img);
-        }
+        vector<Mat> images = load_images(fn);
 
         // Create output directory.
-        std::string outDir = output;
-        try {
-            if (std::filesystem::create_directory(outDir)) {
-                cout << "Directory created successfully: " << outDir << endl;
-            } else {
-                cout << "Directory already exists: " << outDir << endl;
-            }
-        } catch (const std::filesystem::filesystem_error& e) {
-            cerr << "Error creating directory: " << e.what() << endl;
-            return -1;
-        }
+        create_output_directory(output);
 
         // Process images in batches of threads concurrently.
         size_t total = images.size();
@@ -127,7 +144,7 @@ int main(int argc, char **argv) {
                 // Prepare thread data.
                 ThreadData* data = new ThreadData;
                 data->image = images[i + j];  // Copy the image.
-                data->outputPath = outDir + "/gray_" + std::to_string(i + j) + ".jpg";
+                data->outputPath = output + "/gray_" + std::to_string(i + j) + ".jpg";
                 data->threadIndex = i + j; // Assign a unique thread index.
                 
                 cout << "Main thread: Creating thread " << data->threadIndex << endl;
