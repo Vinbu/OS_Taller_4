@@ -58,27 +58,27 @@ void* thread_converter(void* arg) {
  * @return vector<cv::String> List of image file paths.
  */
 vector<cv::String> get_images_path(const string& input) {
-    vector<cv::String> fn;
+    vector<cv::String> paths;
     cout << "Searching in directory: " << input << endl;
-    glob(input, fn, false);
-    if (fn.empty()) {
+    glob(input, paths, false);
+    if (paths.empty()) {
         cout << "No images found in the specified directory." << endl;
     }
-    return fn;
+    return paths;
 }
 
 /**
  * @brief Loads images from file paths.
  * 
- * @param fn Vector of file paths.
+ * @param paths Vector of file paths.
  * @return vector<Mat> Vector of loaded images.
  */
-vector<Mat> load_images(const vector<cv::String>& fn) {
+vector<Mat> load_images(const vector<cv::String>& paths) {
     vector<Mat> images;
-    for (size_t i = 0; i < fn.size(); i++) {
-        Mat img = imread(fn[i]);
+    for (size_t i = 0; i < paths.size(); i++) {
+        Mat img = imread(paths[i]);
         if (img.empty()) {
-            cout << "Could not open or find the image: " << fn[i] << endl;
+            cout << "Could not open or find the image: " << paths[i] << endl;
             continue;
         }
         images.push_back(img);
@@ -117,21 +117,21 @@ int create_output_directory(const string& output) {
  * i: batch
  * j: image in the batch
  * 
- * @param fn Vector of paths of the images.
+ * @param paths Vector of paths of the images.
  * @param images Vector that contains the images.
  * @param output Output directory path.
  * @param num_threads Number of threads to use.
  * @param opt Processing option ("gray" or "format").
  * @param format (Optional) Extenxion to convert the image to when using -f.
  */
-int thread_processing(vector<cv::String> fn, vector<Mat> images, String output, int num_threads, String opt, String format = "") { 
+int thread_processing(vector<cv::String> paths, vector<Mat> images, String output, int num_threads, String opt, String format = "") { 
     size_t total = images.size();
     for (size_t i = 0; i < total; i += num_threads) {
         pthread_t threads[num_threads];
         int threadsCreated = 0;
 
         for (int j = 0; j < num_threads && (i + j) < total; j++) {
-            std::filesystem::path imagePath(fn[i + j]);
+            std::filesystem::path imagePath(paths[i + j]);
             String image_name_format;
             if (opt == "gray") 
                 image_name_format = imagePath.filename().string();
@@ -209,15 +209,15 @@ int main(int argc, char **argv) {
         }
     }
 
-    vector<cv::String> fn = get_images_path(input);
-    vector<Mat> images = load_images(fn);
+    vector<cv::String> paths = get_images_path(input);
+    vector<Mat> images = load_images(paths);
     create_output_directory(output);
 
     if (gFlag) 
-        thread_processing(fn, images, output, num_threads, "gray");
+        thread_processing(paths, images, output, num_threads, "gray");
     if (fFlag) {
         format = "." + format;
-        thread_processing(fn, images, output, num_threads, "format", format);
+        thread_processing(paths, images, output, num_threads, "format", format);
     }
 
     std::cout << "Images processed correctly" << std::endl;
