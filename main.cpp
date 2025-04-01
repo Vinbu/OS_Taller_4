@@ -8,54 +8,56 @@
 using namespace cv;
 using namespace std;
 
-
-// Each threadd will have its own data structure to hold the image and output path. 
+/**
+ * @brief Data structure for passing parameters to thread functions.
+ */
 struct ThreadData {
-    Mat image;
-    std::string outputPath;
-    int threadIndex;
+    Mat image;         
+    String outputPath; 
+    int threadIndex;   
+    String opt;         // Processing option ("gray" or "format").
 };
 
-// Function to convert an image to grayscale.
 Mat convert_to_gray(const Mat& image) {
     Mat grayImage;
     cvtColor(image, grayImage, COLOR_BGR2GRAY);
     return grayImage;
 }
 
-// Thread function that converts the image and saves the result.
-void* thread_convert_gray(void* arg) {
+/**
+ * @brief Thread function that processes an image based on the provided option.
+ * 
+ * If opt is "gray", the image is converted to grayscale; if opt is "format",
+ * the image is saved as is.
+ * 
+ * @param arg Pointer to ThreadData.
+ * @return void* 
+ */
+void* thread_converter(void* arg) {
     ThreadData* data = static_cast<ThreadData*>(arg);
 
-    // Print starting message.
     cout << "Thread " << data->threadIndex << " started processing." << endl;
 
-    Mat gray = convert_to_gray(data->image);
-    imwrite(data->outputPath, gray);
+    if (data->opt == "gray") {
+        Mat grayImage = convert_to_gray(data->image);
+        imwrite(data->outputPath, grayImage);
+    } else if (data->opt == "format") {
+        imwrite(data->outputPath, data->image);
+    }
 
-    // Print finishing message.
     cout << "Thread " << data->threadIndex << " finished processing and saved " << data->outputPath << endl;
 
-    delete data;  // Clean up allocated memory.
-    pthread_exit(nullptr);
+    delete data;
+    pthread_exit(NULL);
 }
 
-void* thread_convert_format(void* arg) {
-    ThreadData* data = static_cast<ThreadData*>(arg);
-
-    // Print starting message.
-    cout << "Thread " << data->threadIndex << " started processing." << endl;
-
-    imwrite(data->outputPath, data->image);
-
-    // Print finishing message.
-    cout << "Thread " << data->threadIndex << " finished processing and saved " << data->outputPath << endl;
-
-    delete data;  // Clean up allocated memory.
-    pthread_exit(nullptr);
-}
-
-vector<cv::String> load_images_filenames(const string& input) {
+/**
+ * @brief Retrieves image file paths from the specified directory.
+ * 
+ * @param input Directory path or wildcard.
+ * @return vector<cv::String> List of image file paths.
+ */
+vector<cv::String> get_images_path(const string& input) {
     vector<cv::String> fn;
     cout << "Searching in directory: " << input << endl;
     glob(input, fn, false);
@@ -65,6 +67,12 @@ vector<cv::String> load_images_filenames(const string& input) {
     return fn;
 }
 
+/**
+ * @brief Loads images from file paths.
+ * 
+ * @param fn Vector of file paths.
+ * @return vector<Mat> Vector of loaded images.
+ */
 vector<Mat> load_images(const vector<cv::String>& fn) {
     vector<Mat> images;
     for (size_t i = 0; i < fn.size(); i++) {
@@ -78,6 +86,12 @@ vector<Mat> load_images(const vector<cv::String>& fn) {
     return images;
 }
 
+/**
+ * @brief Creates the output directory if it does not exist.
+ * 
+ * @param output Output directory path.
+ * @return int 0 if successful, -1 otherwise.
+ */
 int create_output_directory(const string& output) {
     try {
         if (std::filesystem::create_directory(output)) {
@@ -92,6 +106,74 @@ int create_output_directory(const string& output) {
     return 0;
 }
 
+/**
+ * @brief Processes images using multiple threads.
+ * 
+ * Loads images from the input directory, creates an output directory, and processes images
+ * in batches using the specified number of threads. Depending on the option, the images are either
+ * converted to grayscale ("gray") or saved in a different format ("format").
+ *
+ * The i + j index is used to identify the image of the current batch.
+ * i: batch
+ * j: image in the batch
+ * 
+ * @param input Input directory path.
+ * @param output Output directory path.
+ * @param num_threads Number of threads to use.
+ * @param opt Processing option ("gray" or "format").
+ * @param format (Optional) Extenxion to convert the image to when using -f.
+ */
+int thread_processing(String input, String output, int num_threads, String opt, String format = "") { 
+    vector<cv::String> fn = get_images_path(input);
+    vector<Mat> images = load_images(fn);
+    create_output_directory(output);
+
+    if (!format.empty()) format = "." + format;
+
+    size_t total = images.size();
+    for (size_t i = 0; i < total; i += num_threads) {
+        pthread_t threads[num_threads];
+        int threadsCreated = 0;
+
+        for (int j = 0; j < num_threads && (i + j) < total; j++) {
+            std::filesystem::path imagePath(fn[i + j]);
+            String image_name_format;
+            if (opt == "gray") 
+                image_name_format = imagePath.filename().string();
+            if (opt == "format") 
+                image_name_format = imagePath.stem().string();
+            
+            ThreadData* data = new ThreadData;
+            data->image = images[i + j];
+            data->outputPath = output + "/" + image_name_format + format;
+            data->threadIndex = i + j;
+            data->opt = opt;
+
+            cout << "Main thread: Creating thread " << data->threadIndex << endl;
+            int rc = pthread_create(&threads[j], NULL, thread_converter, (void*)data);
+            if (rc) {
+                cerr << "Error: unable to create thread, " << rc << endl;
+                delete data;
+                continue;
+            }
+            threadsCreated++;
+        }
+
+        for (int j = 0; j < threadsCreated; j++) {
+            pthread_join(threads[j], NULL);
+            cout << "Main thread: Joined thread " << (i + j) << endl;
+        }
+    }
+
+    cout << "All images processed and saved." << endl;
+    return 0;
+}
+
+/**
+ * @brief Main function that processes command-line arguments and starts image processing.
+ * 
+ * Usage: ./program [-g | -f] -i input -o output -n threads [-t format]
+ */
 int main(int argc, char **argv) {
     int c;
     bool gFlag = false, fFlag = false;
@@ -102,135 +184,41 @@ int main(int argc, char **argv) {
         switch (c) {
             case 'g':
                 if (fFlag) {
-                    std::cerr << "Error: No se puede usar -g junto con -f" << std::endl;
+                    std::cerr << "Error: -g cannot be used with -f" << std::endl;
                     return 1;
                 }
                 gFlag = true;
                 break;
-
             case 'f':
                 if (gFlag) {
-                    std::cerr << "Error: No se puede usar -f junto con -g" << std::endl;
+                    std::cerr << "Error: -f cannot be used with -g" << std::endl;
                     return 1;
                 }
                 fFlag = true;
                 break;
-
             case 'i':
                 input = optarg;
                 break;
-
             case 'o':
                 output = optarg;
                 break;
-
             case 'n':
                 num_threads = std::stoi(optarg);
                 break;
-
             case 't':
                 format = optarg;
                 break;
-
             default:
-                std::cerr << "Uso: " << argv[0] << " [-g | -f] -i input -o output -n threads" << std::endl;
+                std::cerr << "Usage: " << argv[0] << " [-g | -f] -i input -o output -n threads" << std::endl;
                 return 1;
         }
     }
 
-    if (gFlag) {
-        // Load image filenames.
-        vector<cv::String> fn = load_images_filenames(input);
+    if (gFlag) 
+        thread_processing(input, output, num_threads, "gray");
+    if (fFlag) 
+        thread_processing(input, output, num_threads, "format", format);
 
-        // Load images from the filenames.
-        vector<Mat> images = load_images(fn);
-
-        // Create output directory.
-        create_output_directory(output);
-
-        // Process images in batches of threads concurrently.
-        size_t total = images.size();
-        for (size_t i = 0; i < total; i += num_threads) {
-            pthread_t threads[num_threads];
-            int threadsCreated = 0;
-            
-            // Create up to NUM_THREADS threads if there are images available.
-            for (int j = 0; j < num_threads && (i + j) < total; j++) {
-                std::filesystem::path imagePath(fn[i + j]);
-                std::string image_name_format = imagePath.filename().string();
-                // Prepare thread data.
-                ThreadData* data = new ThreadData;
-                data->image = images[i + j];  // Copy the image.
-                data->outputPath = output + "/" + image_name_format;
-                data->threadIndex = i + j; // Assign a unique thread index.
-                
-                cout << "Main thread: Creating thread " << data->threadIndex << endl;
-                // Create the thread.
-                int rc = pthread_create(&threads[j], nullptr, thread_convert_gray, (void*)data);
-                if (rc) {
-                    cerr << "Error: unable to create thread, " << rc << endl;
-                    delete data;  // Clean up if thread creation fails.
-                    continue;
-                }
-                threadsCreated++;
-            }
-            
-            // Wait for the created threads to finish.
-            for (int j = 0; j < threadsCreated; j++) {
-                pthread_join(threads[j], nullptr);
-                cout << "Main thread: Joined thread " << (i + j) << endl;
-            }
-        }
-
-        cout << "All images processed and saved." << endl;
-        return 0;
-    }
-
-    if (fFlag) {
-        // Load image filenames.
-        vector<cv::String> fn = load_images_filenames(input);
-
-        // Load images from the filenames.
-        vector<Mat> images = load_images(fn);
-
-        // Create output directory.
-        create_output_directory(output);
-
-        size_t total = images.size();
-        for (size_t i = 0; i < total; i += num_threads) {
-            pthread_t threads[num_threads];
-            int threadsCreated = 0;
-            
-            // Create up to NUM_THREADS threads if there are images available.
-            for (int j = 0; j < num_threads && (i + j) < total; j++) {
-                std::filesystem::path imagePath(fn[i + j]);
-                std::string image_name = imagePath.stem().string();
-                // Prepare thread data.
-                ThreadData* data = new ThreadData;
-                data->image = images[i + j];  // Copy the image.
-                data->outputPath = output + "/" + image_name + "." + format;
-                data->threadIndex = i + j; // Assign a unique thread index.
-                
-                cout << "Main thread: Creating thread " << data->threadIndex << endl;
-                // Create the thread.
-                int rc = pthread_create(&threads[j], nullptr, thread_convert_format, (void*)data);
-                if (rc) {
-                    cerr << "Error: unable to create thread, " << rc << endl;
-                    delete data;  // Clean up if thread creation fails.
-                    continue;
-                }
-                threadsCreated++;
-            }
-            
-            // Wait for the created threads to finish.
-            for (int j = 0; j < threadsCreated; j++) {
-                pthread_join(threads[j], nullptr);
-                cout << "Main thread: Joined thread " << (i + j) << endl;
-            }
-        }
-
-        cout << "All images processed and saved." << endl;
-        return 0;
-    }
-    return 0;
+    std::cout << "Images processed correctly" << std::endl;
 }
+
