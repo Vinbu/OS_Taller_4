@@ -117,19 +117,14 @@ int create_output_directory(const string& output) {
  * i: batch
  * j: image in the batch
  * 
- * @param input Input directory path.
+ * @param fn Vector of paths of the images.
+ * @param images Vector that contains the images.
  * @param output Output directory path.
  * @param num_threads Number of threads to use.
  * @param opt Processing option ("gray" or "format").
  * @param format (Optional) Extenxion to convert the image to when using -f.
  */
-int thread_processing(String input, String output, int num_threads, String opt, String format = "") { 
-    vector<cv::String> fn = get_images_path(input);
-    vector<Mat> images = load_images(fn);
-    create_output_directory(output);
-
-    if (!format.empty()) format = "." + format;
-
+int thread_processing(vector<cv::String> fn, vector<Mat> images, String output, int num_threads, String opt, String format = "") { 
     size_t total = images.size();
     for (size_t i = 0; i < total; i += num_threads) {
         pthread_t threads[num_threads];
@@ -214,10 +209,16 @@ int main(int argc, char **argv) {
         }
     }
 
+    vector<cv::String> fn = get_images_path(input);
+    vector<Mat> images = load_images(fn);
+    create_output_directory(output);
+
     if (gFlag) 
-        thread_processing(input, output, num_threads, "gray");
-    if (fFlag) 
-        thread_processing(input, output, num_threads, "format", format);
+        thread_processing(fn, images, output, num_threads, "gray");
+    if (fFlag) {
+        format = "." + format;
+        thread_processing(fn, images, output, num_threads, "format", format);
+    }
 
     std::cout << "Images processed correctly" << std::endl;
 }
